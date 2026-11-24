@@ -13,6 +13,19 @@ export interface NotificationRow {
 export interface NotificationsView {
   channels: Record<string, { configured: boolean }>; targets: Target[]; recent: NotificationRow[]; failed_24h: number;
 }
+export type NodeStatus = 'pending' | 'healthy' | 'degraded' | 'stale' | 'expected-offline' | 'decommissioning';
+export interface OverviewNode {
+  id: string; display_name: string; platform: string; status: NodeStatus; hostname: string | null; agent_version: string | null;
+  last_heartbeat_at: string | null; age_s: number | null; cpu_pct: number | null; mem_pct: number | null; disk_worst_pct: number | null;
+}
+export interface OverviewFarm { id: string; name: string; time_zone: string; healthy: number; nodes: OverviewNode[] }
+export interface Overview {
+  server_time: string;
+  summary: { nodes_total: number; healthy: number; stale: number; degraded: number; pending: number; expected_offline: number;
+             decommissioning: number; needs_attention: number; open_alerts: number; all_clear: boolean };
+  alerts: { id: string; rule: string; subject_label: string; farm_name: string | null; opened_at: string }[];
+  farms: OverviewFarm[];
+}
 export interface Me { user: { id: string; username: string }; org: { id: string; name: string; productName: string } }
 
 export class ApiError extends Error {
@@ -47,6 +60,7 @@ export const api = {
   deleteTarget: (id: string) => request<{ ok: true }>(`/api/notifications/targets/${id}`, { method: 'DELETE' }),
   testNotification: () => request<{ results: { recipient: string; ok: boolean; error?: string }[] }>('/api/notifications/test', { method: 'POST', body: '{}' }),
   retryNotifications: () => request<{ requeued: number }>('/api/notifications/retry', { method: 'POST', body: '{}' }),
+  overview: () => request<Overview>('/api/overview'),
   nodes: (farmId: string) => request<{ nodes: NodeRow[] }>(`/api/farms/${farmId}/nodes`),
   enrolments: (farmId: string) => request<{ enrolments: Enrolment[] }>(`/api/farms/${farmId}/enrolments`),
   createEnrolment: (farmId: string, body: { platform: 'ubuntu' | 'macos'; display_name?: string; intermittent: boolean; initial_config: Record<string, unknown> }) =>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type Me } from './api';
 import { Login } from './Login';
 import { Farms } from './Farms';
+import { Overview } from './Overview';
 import { Alerts } from './Alerts';
 import { Settings } from './Settings';
 
@@ -34,7 +35,8 @@ export function App() {
   useEffect(() => { if (me && me !== 'loading') checkFailures(); }, [me, hash, checkFailures]);
   useEffect(() => { document.title = productName; }, [productName]);
 
-  const view = hash.startsWith('#alerts') ? 'alerts' : hash.startsWith('#settings') ? 'settings' : 'farms';
+  const view = hash.startsWith('#alerts') ? 'alerts' : hash.startsWith('#settings') ? 'settings' : hash.startsWith('#farms') ? 'farms' : 'overview';
+  const farmId = hash.startsWith('#farms/') ? hash.slice('#farms/'.length) : null;
   const alertId = hash.startsWith('#alerts/') ? hash.slice('#alerts/'.length) : null;
 
   if (me === 'loading') return <p className="muted pad">Loading…</p>;
@@ -52,17 +54,19 @@ export function App() {
         </span>
       </header>
       <nav className="tabs">
-        <a href="#" className={view === 'farms' ? 'on' : ''}>Farms</a>
+        <a href="#" className={view === 'overview' ? 'on' : ''}>Overview</a>
+        <a href="#farms" className={view === 'farms' ? 'on' : ''}>Farms</a>
         <a href="#alerts" className={view === 'alerts' ? 'on' : ''}>Alerts</a>
         <a href="#settings" className={view === 'settings' ? 'on' : ''}>Settings</a>
       </nav>
       {failed > 0 && view !== 'settings' && (
         <p className="banner" role="alert">{failed} notification{failed === 1 ? '' : 's'} failed to send. <a href="#settings">See why</a></p>
       )}
-      <main className="pad">
+      <main className={view === 'overview' ? 'pad wide' : 'pad'}>
         {view === 'alerts' && <Alerts highlightId={alertId} />}
         {view === 'settings' && <Settings onChanged={checkFailures} />}
-        {view === 'farms' && <Farms />}
+        {view === 'farms' && <Farms farmId={farmId} />}
+        {view === 'overview' && <Overview onUnauthorized={() => setMe(null)} />}
       </main>
     </div>
   );

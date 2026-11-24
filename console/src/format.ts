@@ -10,3 +10,12 @@ export function formatDuration(totalSeconds: number): string {
 }
 
 export const when = (iso: string) => new Date(iso).toLocaleString();
+
+/** "42 s ago", "5 min ago". Under ten seconds is "just now". */
+export function ago(seconds: number | null): string {
+  if (seconds === null) return 'never';
+  if (seconds < 10) return 'just now';
+  return `${formatDuration(seconds)} ago`;
+}
+
+export const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v)}%`);

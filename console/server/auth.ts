@@ -158,7 +158,7 @@ export interface AuthContext {
   sessionId: string;
 }
 
-async function resolve(req: VercelRequest): Promise<AuthContext | null> {
+async function resolve(req: VercelRequest, touch: boolean): Promise<AuthContext | null> {
   const token = readCookie(req);
   if (!token) return null;
   const r = await db.query<{ session_id: string; user_id: string; username: string; org_id: string; stale: boolean }>(
@@ -173,7 +173,7 @@ async function resolve(req: VercelRequest): Promise<AuthContext | null> {
   );
   const row = r.rows[0];
   if (!row) return null;
-  if (row.stale) {
+  if (row.stale && touch) {
     await db.query('UPDATE sessions SET last_active_at = now() WHERE id = $1', [row.session_id]);
   }
   return { userId: row.user_id, username: row.username, orgId: row.org_id, sessionId: row.session_id };
@@ -191,10 +191,18 @@ function sameOrigin(req: VercelRequest): boolean {
 
 export type AuthedHandler = (req: VercelRequest, res: VercelResponse, ctx: AuthContext) => Promise<unknown> | unknown;
 
+export interface WithAuthOptions {
+  /**
+   * For background polling (the self-refreshing overview). A passive request is authenticated like any other
+   * but does not count as the operator being active, so a screen left open cannot keep a session alive forever.
+   */
+  passive?: boolean;
+}
+
 /** Every operator-facing route goes through this. Handlers must scope every query by ctx.orgId. */
-export function withAuth(handler: AuthedHandler) {
+export function withAuth(handler: AuthedHandler, options: WithAuthOptions = {}) {
   return async (req: VercelRequest, res: VercelResponse) => {
-    const ctx = await resolve(req);
+    const ctx = await resolve(req, !options.passive);
     if (!ctx) return json(res, 401, { error: 'Not authenticated' });
     if (req.method && !['GET', 'HEAD'].includes(req.method) && !sameOrigin(req)) {
       return json(res, 403, { error: 'Cross-origin request refused' });

@@ -5,9 +5,13 @@ import { AddNode } from './AddNode';
 const ZONES: string[] = (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf('timeZone');
 const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-export function Farms() {
+// The selected farm lives in the address bar (#farms/<id>) so the overview and emails can link to it.
+const selectFarm = (id: string | null) => { window.location.hash = id ? `#farms/${id}` : '#farms'; };
+
+export function Farms({ farmId }: { farmId: string | null }) {
   const [farms, setFarms] = useState<Farm[] | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const selected = farmId;
+  const setSelected = selectFarm;
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
