@@ -1,0 +1,29 @@
+# Publishes the agent to this repository's private Releases. The console serves these files to
+# enrolling machines (see docs/decisions/003-repo-layout.md). Tag with: git tag agent-v0.1.0 && git push origin agent-v0.1.0
+name: agent-release
+on:
+  push:
+    tags: ['agent-v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+      - name: Test
+        working-directory: agent
+        run: go test ./...
+      - name: Build
+        working-directory: agent
+        run: ./build.sh "${GITHUB_REF_NAME#agent-v}"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            agent/dist/fleetagent-linux-amd64 agent/dist/fleetagent-darwin-arm64 agent/dist/SHA256SUMS \
+            --title "Agent ${GITHUB_REF_NAME#agent-v}" --generate-notes

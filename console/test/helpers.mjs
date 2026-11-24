@@ -18,6 +18,7 @@ export function mockRes() {
     getHeader(k) { return this.headers[k.toLowerCase()]; },
     status(c) { this.statusCode = c; return this; },
     json(b) { this.body = b; return this; },
+    end(b) { if (b !== undefined) this.body = b; return this; },
   };
   return res;
 }

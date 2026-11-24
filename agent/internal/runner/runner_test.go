@@ -214,3 +214,24 @@ func TestRunStopsPromptlyOnCancel(t *testing.T) {
 		t.Fatal("first heartbeat must be immediate")
 	}
 }
+
+func TestStatusFileRecordsSuccessAndLastError(t *testing.T) {
+	f := newFixture(t)
+	r := f.runner(healthyHost())
+	r.cycle(context.Background())
+	st, err := f.store.ReadStatus()
+	if err != nil || st.LastSuccess != "2026-11-24T10:00:00Z" || st.LastError != "" || st.ConfigVersion != 1 || st.Version != "9.9.9" {
+		t.Fatalf("%+v %v", st, err)
+	}
+	f.reply = func(seq int64) (int, map[string]any, map[string]string) {
+		return 401, map[string]any{"error": "Unauthorized"}, nil
+	}
+	r.cycle(context.Background())
+	st, _ = f.store.ReadStatus()
+	if !strings.Contains(st.LastError, "credential rejected") || st.LastSuccess == "" {
+		t.Fatalf("%+v", st)
+	}
+	if err := f.store.CheckPermissions(); err != nil {
+		t.Fatal(err)
+	}
+}

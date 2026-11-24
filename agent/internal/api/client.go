@@ -138,3 +138,29 @@ func (c *Client) do(ctx context.Context, path, bearer string, body []byte) ([]by
 	}
 	return nil, e
 }
+
+// Ping checks that the console accepts this credential, without storing anything.
+func (c *Client) Ping(ctx context.Context, credential string) error {
+	_, err := c.do(ctx, "/api/ingest/ping", credential, []byte("{}"))
+	return err
+}
+
+// NotifyRemoved tells the console this node has been removed from the machine, so it is marked
+// removed and its credentials are revoked. Best effort by design: removal never depends on it.
+func (c *Client) NotifyRemoved(ctx context.Context, credential string) error {
+	_, err := c.do(ctx, "/api/ingest/removed", credential, []byte("{}"))
+	return err
+}
+
+// Host returns the console's host:port, for the connectivity test.
+func (c *Client) Host() (host, port string) {
+	u, _ := url.Parse(c.base)
+	host, port = u.Hostname(), u.Port()
+	if port == "" {
+		port = "443"
+		if u.Scheme == "http" {
+			port = "80"
+		}
+	}
+	return host, port
+}

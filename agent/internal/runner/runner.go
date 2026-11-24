@@ -28,6 +28,7 @@ type Runner struct {
 
 	lastProblem string
 	noticedCfg  int
+	status      state.Status
 }
 
 type envelope struct {
@@ -112,6 +113,13 @@ func (r *Runner) Once(ctx context.Context) (*api.SnapshotResponse, error) {
 	return resp, nil
 }
 
+// OnceRecorded is Once plus the status file, for `run --once` and anything else that should leave a record.
+func (r *Runner) OnceRecorded(ctx context.Context) (*api.SnapshotResponse, error) {
+	resp, err := r.Once(ctx)
+	r.recordStatus(err)
+	return resp, err
+}
+
 // Run heartbeats at the configured interval until ctx is cancelled. The first heartbeat is immediate.
 func (r *Runner) Run(ctx context.Context) error {
 	for {
@@ -132,6 +140,7 @@ func (r *Runner) cycle(ctx context.Context) time.Duration {
 	}
 
 	_, err := r.Once(ctx)
+	r.recordStatus(err)
 	if err == nil {
 		if r.lastProblem != "" {
 			r.Log.Printf("recovered: heartbeat accepted")
@@ -168,4 +177,25 @@ func Describe(err error) string {
 		return apiErr.Message
 	}
 	return err.Error()
+}
+
+// recordStatus keeps status.json current for `fleetagent status`. It never fails a heartbeat.
+func (r *Runner) recordStatus(err error) {
+	now := r.now().UTC().Format(time.RFC3339)
+	if r.status.StartedAt == "" {
+		r.status.StartedAt = now
+	}
+	r.status.Version = r.Version
+	if cfg, cerr := r.Store.LoadConfig(); cerr == nil {
+		r.status.ConfigVersion = cfg.Version
+	}
+	if err == nil {
+		r.status.LastSuccess = now
+	} else {
+		r.status.LastError = Describe(err)
+		r.status.LastErrorAt = now
+	}
+	if werr := r.Store.WriteStatus(r.status); werr != nil {
+		r.Log.Printf("could not write status file: %v", werr)
+	}
 }

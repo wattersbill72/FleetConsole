@@ -18,7 +18,36 @@ const (
 	fileCredential = "credential"
 	fileConfig     = "config.json"
 	fileSeq        = "seq"
+	fileStatus     = "status.json"
 )
+
+// Status is what the agent last knew about itself, for the local CLI. Written after every heartbeat.
+type Status struct {
+	Version       string `json:"version"`
+	StartedAt     string `json:"started_at"`
+	LastSuccess   string `json:"last_success,omitempty"`
+	LastError     string `json:"last_error,omitempty"`
+	LastErrorAt   string `json:"last_error_at,omitempty"`
+	ConfigVersion int    `json:"config_version"`
+	BufferDepth   int    `json:"buffer_depth"`
+}
+
+func (s *Store) WriteStatus(st Status) error {
+	b, _ := json.MarshalIndent(st, "", "  ")
+	return s.write(fileStatus, b)
+}
+
+func (s *Store) ReadStatus() (Status, error) {
+	var st Status
+	b, err := os.ReadFile(s.path(fileStatus))
+	if err != nil {
+		return st, err
+	}
+	return st, json.Unmarshal(b, &st)
+}
+
+// RawConfig returns config.json as stored, for display.
+func (s *Store) RawConfig() ([]byte, error) { return os.ReadFile(s.path(fileConfig)) }
 
 // DefaultDir is where the agent keeps its state unless told otherwise.
 func DefaultDir() string {
@@ -122,7 +151,7 @@ func (s *Store) CheckPermissions() error {
 	if st.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("%s is accessible to other users (mode %04o); expected 0700", s.Dir, st.Mode().Perm())
 	}
-	for _, f := range []string{fileCredential, fileIdentity, fileConfig, fileSeq} {
+	for _, f := range []string{fileCredential, fileIdentity, fileConfig, fileSeq, fileStatus} {
 		st, err := os.Stat(s.path(f))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
