@@ -107,6 +107,6 @@ These come from ARCH-001 sections 5 to 10. A change to any of them goes to the A
 
 Record verified facts here as they are established (plans in use, accounts, limits) so they are not re-derived. If this section and a story file disagree, this section wins.
 
-- **Hosting plan is UNVERIFIED.** Bill believes Vercel Pro; the screenshot supplied did not show it. Neon plan unknown. Confirm before DEC-004 closes. Assume Pro and Neon Free for design until told otherwise.
+- **Verified 2026-11-24 from Bill's screenshots:** Vercel is on Pro ($20 included credit, per-minute cron available). Neon is on Free, billed and managed through the Vercel integration (Integrations > Neon Database > Settings). Free plan is not enough for Fleet Console's always-on ingest; see DEC-005 (open).
 - **Decisions made 2026-11-24** (see `/docs/decisions/`): own IAM store with a provider interface for later Entra/AD (DEC-001); Go agent, 50 MB limit lifted (DEC-002); single repo `/console /agent /contracts`, private releases, console serves the installer, product name is an org setting (DEC-003).
 - **R1 test nodes:** Mac mini and UBUNTU-Dell01.
