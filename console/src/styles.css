@@ -19,3 +19,8 @@ button.link { background:none; color:var(--accent); padding:0; text-decoration:u
 .empty { margin-top:16px; background:var(--card); border:1px dashed var(--line); border-radius:8px; padding:24px; display:grid; gap:8px; justify-items:start; }
 .cmd { margin:0; padding:12px; background:#101318; color:#e6e9ef; border-radius:6px; overflow-x:auto; white-space:pre-wrap; word-break:break-all; font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; }
 label.check { display:flex; gap:8px; align-items:center; font-weight:400; } label.check input { width:auto; }
+.tabs { display:flex; gap:16px; padding:8px 16px; background:var(--card); border-bottom:1px solid var(--line); }
+.tabs a { color:var(--muted); text-decoration:none; padding:4px 0; } .tabs a.on { color:var(--fg); font-weight:700; border-bottom:2px solid var(--accent); }
+.banner { margin:0; padding:8px 16px; background:#fdecea; color:var(--err); font-weight:600; }
+.filters { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; } .filters input { flex:1 1 200px; width:auto; } .filters select { width:auto; }
+li.hl { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent); }

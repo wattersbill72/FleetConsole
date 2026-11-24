@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { evaluateStaleness } from '../../server/evaluate.js';
+import { deliverDue } from '../../server/notify/deliver.js';
 import { json, methodNotAllowed } from '../../server/http.js';
 
 // Called every minute by Vercel Cron (see vercel.json), which sends `Authorization: Bearer $CRON_SECRET`.
@@ -14,5 +15,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const want = Buffer.from(`Bearer ${secret}`);
   if (given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: 'Unauthorized' });
 
-  return json(res, 200, await evaluateStaleness());
+  const evaluation = await evaluateStaleness();
+  // Delivery is a separate step so a mail problem can never stop detection from running.
+  let delivery = { sent: 0, retrying: 0, failed: 0 };
+  try { delivery = await deliverDue(); } catch { /* the rows stay pending and are retried next minute */ }
+  return json(res, 200, { ...evaluation, delivery });
 }
