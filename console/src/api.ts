@@ -1,6 +1,6 @@
 export interface Farm { id: string; name: string; description: string; time_zone: string; created_at: string; updated_at: string }
 export interface Enrolment { id: string; platform: 'ubuntu' | 'macos'; display_name: string | null; initial_config: Record<string, unknown>; created_at: string; expires_at: string }
-export interface NodeRow { id: string; display_name: string; platform: 'ubuntu' | 'macos'; status: string; hostname: string | null; agent_version: string | null; last_heartbeat_at: string | null; enrolled_at: string }
+export interface NodeRow { id: string; display_name: string; platform: 'ubuntu' | 'macos'; status: string; hostname: string | null; agent_version: string | null; last_heartbeat_at: string | null; enrolled_at: string; decommission_unconfirmed?: boolean; removal_error?: string | null }
 export interface AlertRow {
   id: string; rule: string; subject_label: string; farm_name: string | null; opened_at: string; silent_since: string | null;
   closed_at: string | null; duration_s: number | null; outage_s: number | null; close_reason: string | null; detail: Record<string, unknown>;
@@ -15,6 +15,7 @@ export interface NotificationsView {
 }
 export type NodeStatus = 'pending' | 'healthy' | 'degraded' | 'stale' | 'expected-offline' | 'decommissioning';
 export interface OverviewNode {
+  decommission_unconfirmed: boolean; removal_error: string | null;
   id: string; display_name: string; platform: string; status: NodeStatus; hostname: string | null; agent_version: string | null;
   last_heartbeat_at: string | null; age_s: number | null; cpu_pct: number | null; mem_pct: number | null; disk_worst_pct: number | null;
 }
@@ -60,6 +61,10 @@ export const api = {
   deleteTarget: (id: string) => request<{ ok: true }>(`/api/notifications/targets/${id}`, { method: 'DELETE' }),
   testNotification: () => request<{ results: { recipient: string; ok: boolean; error?: string }[] }>('/api/notifications/test', { method: 'POST', body: '{}' }),
   retryNotifications: () => request<{ requeued: number }>('/api/notifications/retry', { method: 'POST', body: '{}' }),
+  removeNode: (id: string, confirm_name: string, history: 'keep' | 'purge') =>
+    request<{ ok: true; already_requested: boolean }>(`/api/nodes/${id}/remove`, { method: 'POST', body: JSON.stringify({ confirm_name, history }) }),
+  markRemoved: (id: string, confirm_name: string, history: 'keep' | 'purge') =>
+    request<{ ok: true }>(`/api/nodes/${id}/mark-removed`, { method: 'POST', body: JSON.stringify({ confirm_name, history }) }),
   overview: () => request<Overview>('/api/overview'),
   nodes: (farmId: string) => request<{ nodes: NodeRow[] }>(`/api/farms/${farmId}/nodes`),
   enrolments: (farmId: string) => request<{ enrolments: Enrolment[] }>(`/api/farms/${farmId}/enrolments`),

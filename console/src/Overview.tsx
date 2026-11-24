@@ -113,7 +113,7 @@ export function Overview({ onUnauthorized }: { onUnauthorized: () => void }) {
 }
 
 function NodeRow({ n, farmId, sinceFetch }: { n: OverviewNode; farmId: string; sinceFetch: number }) {
-  const st = STATUS[n.status];
+  const st = n.status === 'decommissioning' && n.decommission_unconfirmed ? { icon: '✕', label: 'Removal not confirmed' } : STATUS[n.status];
   const lastKnown = n.status === 'stale' || n.status === 'expected-offline';
   const age = n.age_s === null ? null : n.age_s + sinceFetch;
   const cell = (label: string, v: number | null) => (

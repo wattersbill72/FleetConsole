@@ -3,6 +3,8 @@ import {
   MAX_SNAPSHOT_BYTES, authenticateNode, checkRateLimit, readJsonBody, storeSnapshot, validateSnapshot,
 } from '../../server/ingest.js';
 import { json, methodNotAllowed } from '../../server/http.js';
+import { db } from '../../server/db.js';
+import { recordCommandFailure, takeCommands } from '../../server/decommission.js';
 
 // Public by necessity (ARCH-001 s10). Order matters and is the whole defence:
 //   credential -> rate limit -> size-capped body -> schema -> store.
@@ -35,12 +37,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const out = await storeSnapshot(node, body.value);
-  // The heartbeat response carries what the node must act on (ARCH-001 s8.1). The command queue arrives with US-023.
+
+  // A command the agent says it could not carry out is settled as failed, with its reason, so the operator can see it.
+  const last = (body.value as { agent_health?: { last_command_result?: { command: string; ok: boolean; reason?: string | null } | null } })
+    .agent_health?.last_command_result;
+  if (last && last.ok === false) await recordCommandFailure(db, node.id, last.command, last.reason ?? null);
+
+  // The heartbeat response carries what the node must act on (ARCH-001 s8.1).
   return json(res, 200, {
     ok: true,
     duplicate: out.duplicate,
     last_seq: out.lastSeq,
     desired_config_version: node.desiredConfigVersion,
-    commands: [],
+    commands: await takeCommands(db, node.id),
   });
 }

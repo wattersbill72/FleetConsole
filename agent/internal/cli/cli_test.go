@@ -36,6 +36,7 @@ func rig(t *testing.T, consoleURL string, active string) (*Env, *bytes.Buffer, i
 		BinPath: filepath.Join(root, "fleetagent"), StateDir: filepath.Join(root, "state"),
 		UnitPath: filepath.Join(root, "fleetagent.service"),
 	}
+	l.DeriveMaint()
 	out := &bytes.Buffer{}
 	st := state.New(l.StateDir)
 	cred := "fcn_" + strings.Repeat("b", 43)
@@ -45,6 +46,12 @@ func rig(t *testing.T, consoleURL string, active string) (*Env, *bytes.Buffer, i
 	}
 	e := &Env{Install: &install.Env{L: l, Svc: svc{active}, Users: noUsers{}, Out: out, Version: "1.0"}, Version: "1.0", Out: out}
 	return e, out, l
+}
+
+func writeUnits(l install.Layout) {
+	os.WriteFile(l.UnitPath, l.Unit(), 0o644)
+	os.WriteFile(l.MaintPathUnit, l.MaintPath(), 0o644)
+	os.WriteFile(l.MaintServiceUnit, l.MaintService(), 0o644)
 }
 
 func TestStatusShowsEveryRequiredField(t *testing.T) {
@@ -93,19 +100,19 @@ func TestConfigMasksSecretsAtAnyDepthAndNeverShowsTheCredential(t *testing.T) {
 func TestSelfcheckPassesOnAGoodInstallAndFailsOnEachProblem(t *testing.T) {
 	e, out, l := rig(t, "https://c", "active")
 	os.WriteFile(l.BinPath, []byte("x"), 0o755)
-	os.WriteFile(l.UnitPath, l.Unit(), 0o644)
+	writeUnits(l)
 	if err := e.Selfcheck(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 
 	for _, name := range []string{
 		"program writable by others", "program missing", "unit edited", "credential world-readable",
-		"state dir open", "credential malformed", "service stopped",
+		"state dir open", "credential malformed", "service stopped", "maintenance unit tampered", "maintenance trigger missing",
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, out, l := rig(t, "https://c", "active")
 			os.WriteFile(l.BinPath, []byte("x"), 0o755)
-			os.WriteFile(l.UnitPath, l.Unit(), 0o644)
+			writeUnits(l)
 			switch name { // each case breaks its own fresh, otherwise-good installation
 			case "program writable by others":
 				os.Chmod(l.BinPath, 0o777)
@@ -121,6 +128,10 @@ func TestSelfcheckPassesOnAGoodInstallAndFailsOnEachProblem(t *testing.T) {
 				os.WriteFile(filepath.Join(l.StateDir, "credential"), []byte("nope"), 0o600)
 			case "service stopped":
 				e.Install.Svc = svc{"failed"}
+			case "maintenance unit tampered":
+				os.WriteFile(l.MaintServiceUnit, []byte("[Service]\nUser=root\nExecStart=/bin/sh\n"), 0o644)
+			case "maintenance trigger missing":
+				os.Remove(l.MaintPathUnit)
 			}
 			if err := e.Selfcheck(); err == nil || !strings.Contains(out.String(), "FAIL") {
 				t.Fatalf("expected failure for %q:\n%s", name, out)

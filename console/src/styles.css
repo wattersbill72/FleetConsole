@@ -53,3 +53,5 @@ li.hl { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent); }
   .nrow .nname { grid-column:auto; }
   .nrow [data-label]::before { content:none; }
 }
+.remove { margin-top:6px; } .remove p { margin:4px 0; } fieldset { border:1px solid var(--line); border-radius:6px; }
+code { background:#eef0f3; padding:1px 5px; border-radius:4px; }

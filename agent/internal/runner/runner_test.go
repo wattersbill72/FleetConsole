@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -235,3 +236,131 @@ func TestStatusFileRecordsSuccessAndLastError(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// ---- US-023 ----
+
+type fakeDecom struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeDecom) Decommission(ctx context.Context, id string) error {
+	f.calls = append(f.calls, id)
+	return f.err
+}
+
+func withCommands(f *fixture, cmds ...map[string]any) {
+	f.reply = func(seq int64) (int, map[string]any, map[string]string) {
+		list := []any{}
+		for _, c := range cmds {
+			list = append(list, c)
+		}
+		return 200, map[string]any{"ok": true, "last_seq": seq, "desired_config_version": 1, "commands": list}, nil
+	}
+}
+
+func TestDecommissionCommandRemovesTheAgentAndStopsTheLoop(t *testing.T) {
+	f := newFixture(t)
+	withCommands(f, map[string]any{"id": "9", "command": "decommission", "issued_at": "2026-11-24T10:00:00Z"})
+	d := &fakeDecom{}
+	r := f.runner(healthyHost())
+	r.Decommission = d
+
+	done := make(chan error)
+	go func() { done <- r.Run(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not stop after decommission")
+	}
+	if len(d.calls) != 1 || d.calls[0] != "9" {
+		t.Fatalf("calls %v", d.calls)
+	}
+	if len(f.bodies) != 1 {
+		t.Fatalf("sent %d heartbeats; must stop reporting after the command", len(f.bodies))
+	}
+}
+
+func TestOnceReturnsErrDecommissioned(t *testing.T) {
+	f := newFixture(t)
+	withCommands(f, map[string]any{"id": "1", "command": "decommission", "issued_at": "x"})
+	r := f.runner(healthyHost())
+	r.Decommission = &fakeDecom{}
+	if _, err := r.OnceRecorded(context.Background()); !errors.Is(err, ErrDecommissioned) {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestAFailedRemovalIsReportedOnceInTheNextHeartbeatAndHeartbeatsContinue(t *testing.T) {
+	f := newFixture(t)
+	withCommands(f, map[string]any{"id": "3", "command": "decommission", "issued_at": "x"})
+	r := f.runner(healthyHost())
+	r.Decommission = &fakeDecom{err: errors.New("the maintenance helper did not remove the agent within 2m0s")}
+	ctx := context.Background()
+
+	wait, stop := r.step(ctx)
+	if stop || wait != 60*time.Second {
+		t.Fatalf("a failed removal must not stop the agent: %v %v", wait, stop)
+	}
+	withCommands(f) // the console has settled the command and sends nothing more
+	r.step(ctx)
+	r.step(ctx)
+	if len(f.bodies) != 3 {
+		t.Fatalf("heartbeats %d", len(f.bodies))
+	}
+	health := func(i int) map[string]any { return f.bodies[i]["agent_health"].(map[string]any) }
+	if _, ok := health(0)["last_command_result"]; ok {
+		t.Fatal("the first heartbeat had nothing to report yet")
+	}
+	res, _ := health(1)["last_command_result"].(map[string]any)
+	if res["command"] != "decommission" || res["ok"] != false || !strings.Contains(res["reason"].(string), "did not remove the agent") {
+		t.Fatalf("result %v", res)
+	}
+	if _, ok := health(2)["last_command_result"]; ok {
+		t.Fatal("a result must be reported once, not forever")
+	}
+}
+
+func TestACommandThisVersionCannotDoIsReportedNotRepeated(t *testing.T) {
+	f := newFixture(t)
+	withCommands(f, map[string]any{"id": "5", "command": "upgrade", "issued_at": "x"})
+	r := f.runner(healthyHost())
+	r.step(context.Background())
+	withCommands(f)
+	r.step(context.Background())
+	res := f.bodies[1]["agent_health"].(map[string]any)["last_command_result"].(map[string]any)
+	if res["command"] != "upgrade" || res["ok"] != false || !strings.Contains(res["reason"].(string), "not supported") {
+		t.Fatalf("%v", res)
+	}
+}
+
+func TestWithoutADecommissionerTheAgentSaysItCannot(t *testing.T) {
+	f := newFixture(t)
+	withCommands(f, map[string]any{"id": "6", "command": "decommission", "issued_at": "x"})
+	r := f.runner(healthyHost())
+	r.step(context.Background())
+	withCommands(f)
+	r.step(context.Background())
+	res := f.bodies[1]["agent_health"].(map[string]any)["last_command_result"].(map[string]any)
+	if res["ok"] != false || !strings.Contains(res["reason"].(string), "cannot remove itself") {
+		t.Fatalf("%v", res)
+	}
+}
+
+func TestStoppedByTheHelperCountsAsRemoved(t *testing.T) {
+	f := newFixture(t)
+	withCommands(f, map[string]any{"id": "8", "command": "decommission", "issued_at": "x"})
+	r := f.runner(healthyHost())
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Decommission = decomFunc(func(c context.Context, id string) error { cancel(); return c.Err() })
+	if _, err := r.Once(ctx); !errors.Is(err, ErrDecommissioned) {
+		t.Fatalf("%v", err)
+	}
+}
+
+type decomFunc func(context.Context, string) error
+
+func (f decomFunc) Decommission(ctx context.Context, id string) error { return f(ctx, id) }

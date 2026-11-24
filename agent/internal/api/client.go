@@ -83,12 +83,19 @@ func (c *Client) Enrol(ctx context.Context, r EnrolRequest) (*EnrolResponse, err
 	return &out, nil
 }
 
+// Command is one instruction from the fixed set, delivered in a heartbeat response.
+type Command struct {
+	ID       string `json:"id"`
+	Command  string `json:"command"`
+	IssuedAt string `json:"issued_at"`
+}
+
 type SnapshotResponse struct {
-	OK                   bool              `json:"ok"`
-	Duplicate            bool              `json:"duplicate"`
-	LastSeq              int64             `json:"last_seq"`
-	DesiredConfigVersion int               `json:"desired_config_version"`
-	Commands             []json.RawMessage `json:"commands"`
+	OK                   bool      `json:"ok"`
+	Duplicate            bool      `json:"duplicate"`
+	LastSeq              int64     `json:"last_seq"`
+	DesiredConfigVersion int       `json:"desired_config_version"`
+	Commands             []Command `json:"commands"`
 }
 
 func (c *Client) SendSnapshot(ctx context.Context, credential string, snapshot []byte) (*SnapshotResponse, error) {
@@ -147,8 +154,18 @@ func (c *Client) Ping(ctx context.Context, credential string) error {
 
 // NotifyRemoved tells the console this node has been removed from the machine, so it is marked
 // removed and its credentials are revoked. Best effort by design: removal never depends on it.
-func (c *Client) NotifyRemoved(ctx context.Context, credential string) error {
-	_, err := c.do(ctx, "/api/ingest/removed", credential, []byte("{}"))
+// The body carries the agent's own verification of what it removed.
+type RemovalReport struct {
+	Verified bool     `json:"verified"`
+	Residue  []string `json:"residue"`
+}
+
+func (c *Client) NotifyRemoved(ctx context.Context, credential string, report RemovalReport) error {
+	if report.Residue == nil {
+		report.Residue = []string{}
+	}
+	body, _ := json.Marshal(report)
+	_, err := c.do(ctx, "/api/ingest/removed", credential, body)
 	return err
 }
 

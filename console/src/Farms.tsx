@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, type Farm, type NodeRow } from './api';
 import { AddNode } from './AddNode';
+import { RemoveNode } from './RemoveNode';
 
 const ZONES: string[] = (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf('timeZone');
 const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -168,6 +169,7 @@ function Nodes({ farmId }: { farmId: string }) {
             {nodes.map((n) => (
               <li key={n.id}>
                 <strong>{n.display_name}</strong> <span className="muted">{n.platform} · {n.status}{n.hostname ? ` · ${n.hostname}` : ''}</span>
+                <RemoveNode node={n} onChanged={() => void load()} />
               </li>
             ))}
           </ul>

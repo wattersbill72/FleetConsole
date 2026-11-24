@@ -10,9 +10,12 @@ export default withAuth(async (req, res, ctx) => {
   if (!farm.rows[0]) return json(res, 404, { error: 'Farm not found' });
 
   const r = await db.query(
-    `SELECT id, display_name, platform, status, hostname, agent_version, last_heartbeat_at, enrolled_at
-       FROM nodes WHERE farm_id = $1 AND org_id = $2 AND status <> 'removed'
-      ORDER BY lower(display_name)`,
+    `SELECT n.id, n.display_name, n.platform, n.status, n.hostname, n.agent_version, n.last_heartbeat_at, n.enrolled_at,
+            (n.decommission_unconfirmed_at IS NOT NULL) AS decommission_unconfirmed,
+            (SELECT c.result FROM node_commands c WHERE c.node_id = n.id AND c.command = 'decommission' AND c.status = 'failed'
+              ORDER BY c.id DESC LIMIT 1) AS removal_error
+       FROM nodes n WHERE n.farm_id = $1 AND n.org_id = $2 AND n.status <> 'removed'
+      ORDER BY lower(n.display_name)`,
     [id, ctx.orgId],
   );
   return json(res, 200, { nodes: r.rows });

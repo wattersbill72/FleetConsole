@@ -45,7 +45,7 @@ func (Systemd) Reload() error {
 }
 
 func (Systemd) EnableNow() error {
-	if out, err := sctl("enable", "--now", ServiceName+".service"); err != nil {
+	if out, err := sctl("enable", "--now", ServiceName+".service", MaintPathName); err != nil {
 		return fmt.Errorf("systemctl enable --now: %s", out)
 	}
 	return nil
@@ -53,7 +53,9 @@ func (Systemd) EnableNow() error {
 
 func (Systemd) DisableNow() error {
 	// "not loaded" and "does not exist" are fine: the goal is that it is gone.
-	sctl("disable", "--now", ServiceName+".service")
+	// The maintenance service itself is not stopped: it is the process doing this when a console-requested
+	// decommission runs, and it ends on its own.
+	sctl("disable", "--now", ServiceName+".service", MaintPathName)
 	return nil
 }
 

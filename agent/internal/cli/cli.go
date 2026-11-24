@@ -241,7 +241,9 @@ func (e *Env) Selfcheck() error {
 	}
 
 	add("Program installed", fileErr(l.BinPath, 0o022, true), l.BinPath)
-	add("Service unit present", unitErr(l), l.UnitPath)
+	add("Service unit present", unitErr(l.UnitPath, l.Unit()), l.UnitPath)
+	add("Maintenance trigger present", unitErr(l.MaintPathUnit, l.MaintPath()), l.MaintPathUnit)
+	add("Maintenance unit present", unitErr(l.MaintServiceUnit, l.MaintService()), l.MaintServiceUnit)
 	if l.UnitPath != "" {
 		active, enabled := e.Install.Svc.Status()
 		switch {
@@ -294,13 +296,13 @@ func fileErr(p string, badBits os.FileMode, wantExec bool) error {
 	return nil
 }
 
-func unitErr(l install.Layout) error {
-	b, err := os.ReadFile(l.UnitPath)
+func unitErr(path string, want []byte) error {
+	b, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("%s is missing", l.UnitPath)
+		return fmt.Errorf("%s is missing", path)
 	}
-	if sha256.Sum256(b) != sha256.Sum256(l.Unit()) {
-		return fmt.Errorf("%s differs from what this agent version installs (edited or from another version)", l.UnitPath)
+	if sha256.Sum256(b) != sha256.Sum256(want) {
+		return fmt.Errorf("%s differs from what this agent version installs (edited or from another version)", path)
 	}
 	return nil
 }
@@ -332,6 +334,7 @@ func Help() string {
 		{"test", "step-by-step connectivity test: DNS, reach, credential, snapshot"},
 		{"config", "show the applied configuration with secrets masked"},
 		{"selfcheck", "validate installation integrity and permissions; non-zero on failure"},
+		{"maintenance decommission", "run by the service manager when the console removes this node; not for hand use"},
 		{"version", "print the agent version"},
 		{"help", "this list"},
 	}

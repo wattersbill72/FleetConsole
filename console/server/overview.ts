@@ -11,6 +11,7 @@ export interface OverviewNode {
   id: string; display_name: string; platform: string; status: NodeStatus; stored_status: string;
   hostname: string | null; agent_version: string | null; intermittent: boolean;
   last_heartbeat_at: string | null; age_s: number | null;
+  decommission_unconfirmed: boolean; removal_error: string | null;
   cpu_pct: number | null; mem_pct: number | null; mem_used_bytes: number | null; mem_total_bytes: number | null; disk_worst_pct: number | null;
 }
 
@@ -27,6 +28,9 @@ export async function buildOverview(orgId: string) {
       `SELECT n.id, n.farm_id, n.display_name, n.platform, n.status, n.hostname, n.agent_version, n.last_heartbeat_at, n.latest,
               COALESCE((c.config->>'intermittent')::boolean, false) AS intermittent,
               extract(epoch FROM now() - n.last_heartbeat_at)::int AS age_s,
+              (n.decommission_unconfirmed_at IS NOT NULL) AS decommission_unconfirmed,
+              (SELECT c.result FROM node_commands c WHERE c.node_id = n.id AND c.command = 'decommission' AND c.status = 'failed'
+                ORDER BY c.id DESC LIMIT 1) AS removal_error,
               (n.last_heartbeat_at IS NOT NULL AND now() - n.last_heartbeat_at >=
                  make_interval(secs => $2 * COALESCE((c.config->>'heartbeat_interval_s')::int, 60))) AS overdue
          FROM nodes n
@@ -55,6 +59,7 @@ export async function buildOverview(orgId: string) {
     const node: OverviewNode = {
       id: r.id, display_name: r.display_name, platform: r.platform, status, stored_status: r.status,
       hostname: r.hostname, agent_version: r.agent_version, intermittent: r.intermittent,
+      decommission_unconfirmed: r.decommission_unconfirmed, removal_error: r.removal_error,
       last_heartbeat_at: r.last_heartbeat_at ? new Date(r.last_heartbeat_at).toISOString() : null, age_s: r.age_s,
       cpu_pct: l.cpu_pct ?? null, mem_used_bytes: l.mem_used_bytes ?? null, mem_total_bytes: l.mem_total_bytes ?? null,
       mem_pct: pct(l.mem_used_bytes ?? null, l.mem_total_bytes ?? null), disk_worst_pct: l.disk_worst_pct ?? null,

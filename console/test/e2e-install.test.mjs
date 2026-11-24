@@ -19,6 +19,7 @@ import ping from '../build-test/api/ingest/ping.js';
 import removed from '../build-test/api/ingest/removed.js';
 import download from '../build-test/api/agent/download.js';
 import installRoute from '../build-test/api/install.js';
+import removeNode from '../build-test/api/nodes/[id]/remove.js';
 
 let skip = null, work, binSrc, sums, consoleSrv, ghSrv, base, ghBase, tamper = false;
 
@@ -121,7 +122,7 @@ async function setup() {
   const flags = ['--dir', paths.dir, '--bin', paths.bin, '--unit', paths.unit, '--no-service', '--no-user'];
   const files = () => [paths.bin, paths.unit, paths.dir].filter(existsSync);
   const fetchScript = async () => (await fetch(`${base}/install.sh`)).text();
-  return { op, farm, issue, paths, flags, files, fetchScript };
+  return { op, cookie, farm, issue, paths, flags, files, fetchScript };
 }
 const nodes = async (farmId) => (await db.query('SELECT * FROM nodes WHERE farm_id = $1', [farmId])).rows;
 
@@ -273,4 +274,53 @@ test('the token never appears in any process argument list during an install', a
   // operator (the documented one-liner). curl and the agent must never carry it.
   const leaks = [...seen].filter((c) => /^(\S*\/)?(curl|fleetagent)\s/.test(c));
   assert.deepEqual(leaks, []);
+});
+
+test('US-023 end to end: the console asks, the real agent removes itself and confirms, nothing else on the machine is touched', async (t) => {
+  if (skip) return t.skip(skip);
+  if (process.getuid() !== 0) return t.skip('direct removal path needs root; the unprivileged path is covered by Go tests with a fake helper');
+  const s = await setup();
+  const script = await s.fetchScript();
+  const r = await sh(script, ['--token', await s.issue(), ...s.flags]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const [node] = await nodes(s.farm.id);
+  assert.equal((await run(s.paths.bin, ['run', '--once', '--dir', s.paths.dir])).code, 0);
+  assert.equal((await nodes(s.farm.id))[0].status, 'healthy');
+
+  // Things that are not the agent's: a sibling of the program, and a neighbour of the state directory.
+  const bystanderBin = join(s.paths.bin, '..', 'other-tool');
+  const bystanderState = join(s.paths.dir, '..', 'someone-elses-data');
+  writeFileSync(bystanderBin, 'keep'); writeFileSync(bystanderState, 'keep');
+
+  // The operator removes it: the name must be typed, and history is purged.
+  const bad = await call(removeNode, { method: 'POST', cookie: s.cookie, query: { id: node.id }, body: { confirm_name: 'nope', history: 'purge' } });
+  assert.equal(bad.statusCode, 400);
+  assert.equal((await call(removeNode, { method: 'POST', cookie: s.cookie, query: { id: node.id }, body: { confirm_name: 'dell01', history: 'purge' } })).statusCode, 202);
+  assert.equal((await nodes(s.farm.id))[0].status, 'decommissioning');
+  assert.equal(s.files().length, 3, 'nothing happens on the machine until the agent hears from the console');
+
+  // Its next heartbeat carries the command; the agent removes itself and says so.
+  const out = await run(s.paths.bin, ['run', '--once', '--dir', s.paths.dir, '--bin', s.paths.bin, '--unit', s.paths.unit, '--no-service', '--no-user']);
+  assert.equal(out.code, 0, out.err + out.out);
+  assert.match(out.out, /remove itself, and it has/);
+  assert.match(out.out, /Verified: nothing of the agent remains/);
+  assert.deepEqual(s.files(), []);
+  assert.ok(existsSync(join(s.paths.dir, '..', 'someone-elses-data')) && readFileSync(bystanderState, 'utf8') === 'keep');
+  assert.equal(readFileSync(bystanderBin, 'utf8'), 'keep');
+  assert.ok(![join(s.paths.bin, '..', 'fleetagent-maint.path')].some(existsSync));
+
+  // The console agrees: removed by the agent's own confirmation, credential revoked, command settled, history purged.
+  const n = (await db.query('SELECT * FROM nodes WHERE id = $1', [node.id])).rows[0];
+  assert.deepEqual([n.status, n.removed_via], ['removed', 'agent']);
+  assert.deepEqual(n.removal_report, { verified: true, residue: [] });
+  assert.equal((await db.query('SELECT count(*) AS n FROM node_credentials WHERE node_id = $1 AND revoked_at IS NULL', [node.id])).rows[0].n, '0');
+  assert.equal((await db.query('SELECT status FROM node_commands WHERE node_id = $1', [node.id])).rows[0].status, 'confirmed');
+  assert.equal((await db.query('SELECT count(*) AS n FROM snapshots WHERE node_id = $1', [node.id])).rows[0].n, '0');
+  const ev = (await db.query(`SELECT detail FROM audit_events WHERE action = 'node.remove' AND subject_id = $1`, [node.id])).rows[0].detail;
+  assert.deepEqual([ev.via, ev.history, ev.verified], ['agent-confirmation', 'purged', true]);
+
+  // The machine can be enrolled again as a new node.
+  const re = await sh(script, ['--token', await s.issue(), ...s.flags]);
+  assert.equal(re.code, 0, re.err + re.out);
+  assert.equal((await nodes(s.farm.id)).filter((x) => x.status === 'pending').length, 1);
 });

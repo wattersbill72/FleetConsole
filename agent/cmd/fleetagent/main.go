@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -42,6 +43,8 @@ func main() {
 		err = cmdInstall(args)
 	case "uninstall":
 		err = cmdUninstall(args)
+	case "maintenance":
+		err = cmdMaintenance(args)
 	case "status":
 		err = withCLI(args, func(e *cli.Env) error { return e.Status() })
 	case "config":
@@ -83,6 +86,7 @@ func addLayoutFlags(fs *flag.FlagSet) layoutFlags {
 func (f layoutFlags) env(out io.Writer) *install.Env {
 	l := install.DefaultLayout()
 	l.StateDir, l.BinPath, l.UnitPath = *f.dir, *f.bin, *f.unit
+	l.DeriveMaint()
 	e := &install.Env{L: l, Svc: install.Systemd{}, Users: install.SystemUsers{}, Out: out, Version: version, HeartbeatWait: 30 * time.Second}
 	if *f.noService {
 		e.Svc = install.NoServices{}
@@ -185,9 +189,23 @@ func cmdEnrol(args []string) error {
 	return nil
 }
 
+func cmdMaintenance(args []string) error {
+	if len(args) < 1 || args[0] != "decommission" {
+		return fmt.Errorf("usage: fleetagent maintenance decommission (run by the service manager, not by hand)")
+	}
+	fs := flag.NewFlagSet("maintenance", flag.ExitOnError)
+	lf := addLayoutFlags(fs)
+	fs.Parse(args[1:])
+	if err := requireRoot(lf); err != nil {
+		return err
+	}
+	return lf.env(os.Stdout).MaintenanceDecommission(context.Background())
+}
+
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	dir := fs.String("dir", state.DefaultDir(), "state directory")
+	lf := addLayoutFlags(fs)
+	dir := lf.dir
 	once := fs.Bool("once", false, "send one heartbeat and exit")
 	logPath := fs.String("log", "", "write the log to this file (rotating) instead of stderr")
 	fs.Parse(args)
@@ -213,15 +231,31 @@ func cmdRun(args []string) error {
 		defer lw.Close()
 		logOut = lw
 	}
+	logger := log.New(logOut, "fleetagent: ", log.LstdFlags|log.LUTC)
 	r := &runner.Runner{
-		Store: st, Client: cl, Collector: collect.New(), Version: version,
-		Log: log.New(logOut, "fleetagent: ", log.LstdFlags|log.LUTC),
+		Store: st, Client: cl, Collector: collect.New(), Version: version, Log: logger,
+	}
+	// Running with the rights to remove itself: do it in-process. As the unprivileged service: ask the
+	// root-owned maintenance unit (DEC-006).
+	var summary io.Writer = logOut // the log, which removal then deletes along with everything else
+	if *once {
+		summary = os.Stdout
+	}
+	ienv := lf.env(summary)
+	if os.Geteuid() == 0 {
+		r.Decommission = install.DirectDecommissioner{Env: ienv}
+	} else {
+		r.Decommission = install.RequestDecommissioner{L: ienv.L}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *once {
 		resp, err := r.OnceRecorded(ctx)
+		if errors.Is(err, runner.ErrDecommissioned) {
+			fmt.Println("The console asked this agent to remove itself, and it has.")
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("%s", runner.Describe(err))
 		}

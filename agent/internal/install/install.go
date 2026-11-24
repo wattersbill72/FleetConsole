@@ -127,7 +127,11 @@ func (e *Env) Install(ctx context.Context, o Options) (err error) {
 		return err
 	}
 	// From here the console knows this node. If a later step fails, tell it, so no orphan stays pending.
-	undo = append(undo, func() { e.notifyRemoved(st, client) })
+	undo = append(undo, func() {
+		if cred, err := st.LoadCredential(); err == nil {
+			e.notifyRemoved(cred, client, api.RemovalReport{Verified: true})
+		}
+	})
 
 	// 4. private to the service account
 	if err = os.MkdirAll(filepath.Join(e.L.StateDir, "logs"), 0o700); err != nil {
@@ -142,6 +146,10 @@ func (e *Env) Install(ctx context.Context, o Options) (err error) {
 		return fmt.Errorf("writing the service unit: %w", err)
 	}
 	undo = append(undo, func() { os.Remove(e.L.UnitPath); e.Svc.Reload() })
+	if err = e.writeMaintUnits(); err != nil {
+		return err
+	}
+	undo = append(undo, func() { os.Remove(e.L.MaintPathUnit); os.Remove(e.L.MaintServiceUnit); e.Svc.Reload() })
 	if err = e.Svc.Reload(); err != nil {
 		return err
 	}
@@ -223,6 +231,11 @@ func (e *Env) upgrade(ctx context.Context, o Options) error {
 		restore()
 		return fmt.Errorf("upgrade failed, previous version kept: %w", err)
 	}
+	if err := e.writeMaintUnits(); err != nil {
+		os.Remove(e.L.BinPath)
+		restore()
+		return fmt.Errorf("upgrade failed, previous version kept: %w", err)
+	}
 	if err := e.Svc.Reload(); err == nil {
 		err = e.Svc.Restart()
 		if err != nil {
@@ -236,6 +249,16 @@ func (e *Env) upgrade(ctx context.Context, o Options) error {
 	}
 	os.Remove(backup)
 	e.say("Upgraded to %s. Identity, credential, configuration and sequence were kept.", e.Version)
+	return nil
+}
+
+func (e *Env) writeMaintUnits() error {
+	if err := os.WriteFile(e.L.MaintServiceUnit, e.L.MaintService(), 0o644); err != nil {
+		return fmt.Errorf("writing the maintenance unit: %w", err)
+	}
+	if err := os.WriteFile(e.L.MaintPathUnit, e.L.MaintPath(), 0o644); err != nil {
+		return fmt.Errorf("writing the maintenance trigger: %w", err)
+	}
 	return nil
 }
 

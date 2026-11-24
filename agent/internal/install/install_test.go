@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"fleetconsole/agent/internal/collect"
 )
@@ -64,11 +66,12 @@ func (f *fakeUsers) ChownAll(string, string) error { return f.failChown }
 // ---- console stub ----
 
 type console struct {
-	srv       *httptest.Server
-	enrols    atomic.Int32
-	removed   atomic.Int32
-	removedBy atomic.Value
-	enrolFail int // HTTP status to return for /api/enrol, 0 = success
+	srv         *httptest.Server
+	enrols      atomic.Int32
+	removed     atomic.Int32
+	removedBy   atomic.Value
+	removedBody atomic.Value
+	enrolFail   int // HTTP status to return for /api/enrol, 0 = success
 }
 
 func newConsole(t *testing.T) *console {
@@ -88,6 +91,8 @@ func newConsole(t *testing.T) *console {
 		case "/api/ingest/removed":
 			c.removed.Add(1)
 			c.removedBy.Store(r.Header.Get("Authorization"))
+			b, _ := io.ReadAll(r.Body)
+			c.removedBody.Store(string(b))
 			w.Write([]byte(`{"ok":true}`))
 		default:
 			w.WriteHeader(404)
@@ -124,6 +129,7 @@ func newRig(t *testing.T) *rig {
 		},
 		Svc: r.svc, Users: r.users, Out: r.out, Version: "1.2.3",
 	}
+	r.env.L.DeriveMaint()
 	os.MkdirAll(filepath.Dir(r.env.L.UnitPath), 0o755)
 	return r
 }
@@ -370,7 +376,7 @@ func TestReinstallRemovesThenEnrolsAsANewNode(t *testing.T) {
 	if c.enrols.Load() != 2 || c.removed.Load() != 1 {
 		t.Fatalf("enrols %d removed %d", c.enrols.Load(), c.removed.Load())
 	}
-	if !r.svc.active || len(r.env.L.Residue(r.users)) != 4 {
+	if !r.svc.active || len(r.env.L.Residue(r.users)) != 6 {
 		t.Fatalf("not reinstalled: %v", r.env.L.Residue(r.users))
 	}
 }
@@ -422,5 +428,184 @@ func TestStatusJSONIsNotRequiredForInstallSummary(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(r.env.L.StateDir, "config.json"))
 	if json.Unmarshal(b, &v) != nil || v["version"] != float64(1) {
 		t.Fatal("config not stored")
+	}
+}
+
+// ---- US-023: console-requested removal ----
+
+func TestMaintenanceUnitsAreRootOwnedFixedActionAndWatchOneFile(t *testing.T) {
+	l := DefaultLayout()
+	path, svc := string(l.MaintPath()), string(l.MaintService())
+	for _, want := range []string{"PathExists=/var/lib/fleetagent/decommission.request", "Unit=fleetagent-maint.service", "WantedBy=multi-user.target"} {
+		if !strings.Contains(path, want) {
+			t.Errorf("path unit lacks %q", want)
+		}
+	}
+	for _, want := range []string{"Type=oneshot", "User=root",
+		"ExecStart=/usr/local/bin/fleetagent maintenance decommission --dir /var/lib/fleetagent --bin /usr/local/bin/fleetagent --unit /etc/systemd/system/fleetagent.service"} {
+		if !strings.Contains(svc, want) {
+			t.Errorf("service unit lacks %q", want)
+		}
+	}
+	if strings.Contains(svc, "[Install]") {
+		t.Error("the maintenance service must not be enabled on its own; only the path unit starts it")
+	}
+	if !strings.Contains(string(l.Unit()), "User=fleetagent") {
+		t.Error("the agent itself stays unprivileged")
+	}
+}
+
+func TestInstallWritesTheMaintenanceUnitsAndUninstallRemovesThem(t *testing.T) {
+	r, c := newRig(t), newConsole(t)
+	if err := r.install(c); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{r.env.L.MaintPathUnit, r.env.L.MaintServiceUnit} {
+		if b, err := os.ReadFile(p); err != nil || len(b) == 0 {
+			t.Fatalf("%s: %v", p, err)
+		}
+	}
+	if _, err := r.env.Uninstall(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if tr := r.tree(); len(tr) != 0 {
+		t.Fatalf("files remain: %v", tr)
+	}
+}
+
+func TestUninstallTellsTheConsoleLastAndReportsItsOwnVerification(t *testing.T) {
+	r, c := newRig(t), newConsole(t)
+	r.install(c)
+	if _, err := r.env.Uninstall(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var got api_report
+	json.Unmarshal([]byte(c.removedBody.Load().(string)), &got)
+	if !got.Verified || len(got.Residue) != 0 {
+		t.Fatalf("report %+v", got)
+	}
+
+	// With something left behind the report says so, and still reaches the console.
+	r2, c2 := newRig(t), newConsole(t)
+	r2.install(c2)
+	os.WriteFile(filepath.Join(r2.env.L.StateDir, "not-ours.txt"), []byte("x"), 0o600)
+	if _, err := r2.env.Uninstall(context.Background()); err == nil {
+		t.Fatal("expected an error for the leftover")
+	}
+	var got2 api_report
+	json.Unmarshal([]byte(c2.removedBody.Load().(string)), &got2)
+	if got2.Verified || len(got2.Residue) != 1 || got2.Residue[0] != r2.env.L.StateDir {
+		t.Fatalf("report %+v", got2)
+	}
+}
+
+type api_report struct {
+	Verified bool     `json:"verified"`
+	Residue  []string `json:"residue"`
+}
+
+func TestMaintenanceActsOnlyOnARequestFromTheAgent(t *testing.T) {
+	r, c := newRig(t), newConsole(t)
+	r.install(c)
+	before := snapshotTree(t, r.root)
+
+	// No request file: refuses, changes nothing, and does not tell the console anything.
+	if err := r.env.MaintenanceDecommission(context.Background()); err == nil {
+		t.Fatal("expected a refusal")
+	}
+	if after := snapshotTree(t, r.root); after != before || c.removed.Load() != 0 {
+		t.Fatal("changed something without a request")
+	}
+	// A request that is a link, not a file, is refused as well.
+	target := filepath.Join(r.root, "elsewhere")
+	os.WriteFile(target, []byte("keep"), 0o600)
+	os.Symlink(target, r.env.L.RequestPath())
+	if err := r.env.MaintenanceDecommission(context.Background()); err == nil {
+		t.Fatal("a link must not count as a request")
+	}
+	os.Remove(r.env.L.RequestPath())
+
+	// A real request: the whole agent goes, the request file with it, and the console is told.
+	os.WriteFile(r.env.L.RequestPath(), []byte("decommission 7\n"), 0o600)
+	if err := r.env.MaintenanceDecommission(context.Background()); err != nil {
+		t.Fatalf("%v\n%s", err, r.out)
+	}
+	if left := r.env.L.Residue(r.users); len(left) != 0 {
+		t.Fatalf("left: %v", left)
+	}
+	if c.removed.Load() != 1 {
+		t.Fatal("console not told")
+	}
+	if b, err := os.ReadFile(target); err != nil || string(b) != "keep" {
+		t.Fatal("touched a file outside the agent")
+	}
+}
+
+func TestUninstallNeverFollowsLinksThePlantedInTheStateDirectory(t *testing.T) {
+	r, c := newRig(t), newConsole(t)
+	r.install(c)
+	victim := filepath.Join(r.root, "victim")
+	os.MkdirAll(victim, 0o755)
+	os.WriteFile(filepath.Join(victim, "agent.log"), []byte("precious"), 0o600)
+	logs := filepath.Join(r.env.L.StateDir, "logs")
+	os.RemoveAll(logs)
+	os.Symlink(victim, logs) // what a compromised agent account could do
+
+	r.env.Uninstall(context.Background())
+	if b, err := os.ReadFile(filepath.Join(victim, "agent.log")); err != nil || string(b) != "precious" {
+		t.Fatal("followed a link out of the state directory")
+	}
+
+	// The state directory itself replaced by a link: only the link goes.
+	r2, c2 := newRig(t), newConsole(t)
+	r2.install(c2)
+	victim2 := filepath.Join(r2.root, "victim2")
+	os.MkdirAll(victim2, 0o755)
+	os.WriteFile(filepath.Join(victim2, "credential"), []byte("precious"), 0o600)
+	os.RemoveAll(r2.env.L.StateDir)
+	os.Symlink(victim2, r2.env.L.StateDir)
+	r2.env.Uninstall(context.Background())
+	if b, err := os.ReadFile(filepath.Join(victim2, "credential")); err != nil || string(b) != "precious" {
+		t.Fatal("followed the state directory link")
+	}
+}
+
+func TestRequestDecommissionerWritesAPrivateRequestAndWaitsToBeStopped(t *testing.T) {
+	dir := t.TempDir()
+	l := Layout{StateDir: dir}
+	d := RequestDecommissioner{L: l, Wait: 5 * time.Second}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { done <- d.Decommission(ctx, "42") }()
+	time.Sleep(100 * time.Millisecond)
+	fi, err := os.Stat(l.RequestPath())
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("request file: %v %v", err, fi)
+	}
+	cancel() // the helper stopped the service
+	if err := <-done; err == nil {
+		t.Fatal("expected the context error")
+	}
+
+	// Nothing stops it: it gives up, says why, and takes its request back so it cannot fire later.
+	d2 := RequestDecommissioner{L: l, Wait: 150 * time.Millisecond}
+	err = d2.Decommission(context.Background(), "43")
+	if err == nil || !strings.Contains(err.Error(), "did not remove the agent") {
+		t.Fatalf("%v", err)
+	}
+	if _, serr := os.Stat(l.RequestPath()); serr == nil {
+		t.Fatal("request file left behind")
+	}
+}
+
+func TestDirectDecommissionerRemovesEverything(t *testing.T) {
+	r, c := newRig(t), newConsole(t)
+	r.install(c)
+	if err := (DirectDecommissioner{Env: r.env}).Decommission(context.Background(), "1"); err != nil {
+		t.Fatal(err)
+	}
+	if left := r.env.L.Residue(r.users); len(left) != 0 {
+		t.Fatalf("left: %v", left)
 	}
 }

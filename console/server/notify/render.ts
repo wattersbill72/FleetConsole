@@ -39,6 +39,10 @@ export function formatTime(d: Date, timeZone: string | null): string {
 }
 
 function condition(a: AlertView): string {
+  if (a.rule === 'removal_unconfirmed') {
+    return `was asked to remove itself but did not confirm within ${a.detail?.minutes ?? 15} minutes. Its credential has been revoked. ` +
+      'Run "sudo fleetagent uninstall" on the machine, then mark the node removed in the console';
+  }
   if (a.rule === 'node_stale') {
     const t = a.detail?.threshold_s ? ` (no heartbeat for ${formatDuration(a.detail.threshold_s)})` : '';
     return `has stopped reporting${t}`;
@@ -62,11 +66,18 @@ export function renderAlert(opts: {
   let title: string;
 
   if (kind === 'alert_open') {
-    title = `[${product}] ALERT: ${subject} ${a.rule === 'farm_stale' ? 'has no machine reporting' : 'is not reporting'}`;
+    title = `[${product}] ALERT: ${subject} ${a.rule === 'farm_stale' ? 'has no machine reporting' : a.rule === 'removal_unconfirmed' ? 'removal was not confirmed' : 'is not reporting'}`;
     lines.push(`${subject}${where}: ${condition(a)}.`, '');
     lines.push(`Opened:        ${formatTime(a.opened_at, tz)}`);
     if (a.silent_since) lines.push(`Last heard:    ${formatTime(a.silent_since, tz)}`);
   } else {
+    if (a.rule === 'removal_unconfirmed') {
+      return {
+        subject: `[${product}] RESOLVED: ${subject} is now marked removed`,
+        text: [`${subject}${where} has been marked removed.`, ...(opts.link ? ['', `View: ${opts.link}`] : [])].join('\n'),
+        html: `<pre style="font:14px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap">${esc(`${subject}${where} has been marked removed.`)}</pre>`,
+      };
+    }
     const down = a.outage_s ?? a.duration_s;
     title = `[${product}] RESOLVED: ${subject} is reporting again${down != null ? ` (silent ${formatDuration(down)})` : ''}`;
     lines.push(`${subject}${where} is reporting again.`, '');
