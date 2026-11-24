@@ -101,6 +101,7 @@ These come from ARCH-001 sections 5 to 10. A change to any of them goes to the A
 - `/docs/decisions/`: decision records, one per significant choice (identity reuse OD-3, agent language, log store, tunnel)
 - `/docs/requirements/`: per-story working requirements created by Claude Code
 - `/docs/issues/`: defects and gaps found along the way
+- `/console`: the web app (Vercel root directory). `server/` shared logic, `api/` route handlers (each wrapped in `withAuth` from `server/auth.ts`), `db/migrations/`, `src/` React UI. `cd console && npm test` runs the integration tests against a throwaway local Postgres; `npm run typecheck` and `npm run build` check the rest.
 - Release sequence is ARCH-001 section 18. Install and remove ship together.
 
 ## Operational facts
