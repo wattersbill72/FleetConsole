@@ -9,3 +9,5 @@ Reasoning: the 50 MB memory budget was arbitrary and is lifted; the deciding fac
 Mitigation: Snapshot and Desired Config are defined once as JSON Schema in `/contracts`; the console (TypeScript) and agent (Go) both validate against them, so the languages do not drift.
 
 Footprint: still measured and recorded (US-013), no longer a hard gate. Target stays modest, not enforced.
+
+Update 2026-11-24: first build is standard-library only (no module dependencies), about 6 MB per platform, 7 MB resident on Ubuntu. Measured numbers are in docs/requirements/US-011-013-agent-core.md.

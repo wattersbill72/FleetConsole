@@ -103,6 +103,7 @@ These come from ARCH-001 sections 5 to 10. A change to any of them goes to the A
 - `/docs/issues/`: defects and gaps found along the way
 - `/contracts`: JSON Schemas for Snapshot and Desired Config; `cd console && npm run contracts:build` after editing them (a test fails if the copy in `server/contracts.generated.ts` is stale).
 - `/console`: the web app (Vercel root directory). `server/` shared logic, `api/` route handlers (each wrapped in `withAuth` from `server/auth.ts`), `db/migrations/`, `src/` React UI. `cd console && npm test` runs the integration tests against a throwaway local Postgres; `npm run typecheck` and `npm run build` check the rest.
+- `/agent`: the Edge Agent (Go, standard library only; ask before adding a module). `cd agent && go test ./... && ./build.sh <version>`. `console/test/e2e-agent.test.mjs` runs the real binary against the real console handlers. macOS code is fixture-tested only until it has run on the Mac mini.
 - Release sequence is ARCH-001 section 18. Install and remove ship together.
 
 ## Operational facts
