@@ -3,6 +3,7 @@ import { db, tx, type Queryable } from './db.js';
 import { sha256 } from './enrol.js';
 import { snapshotV1 } from './contracts.generated.js';
 import { validate } from './schema.js';
+import { RULE_FARM_STALE, RULE_NODE_STALE, closeAlert } from './alerts.js';
 
 export const MAX_SNAPSHOT_BYTES = 256 * 1024;
 export const INGEST_LIMIT_PER_MINUTE = 60;   // live (1/min) plus replay headroom; the agent honours Retry-After
@@ -115,8 +116,8 @@ export async function storeSnapshot(node: IngestNode, s: any): Promise<StoreResu
 
   return tx(async (q: Queryable) => {
     // Serialise per node so "latest" and last_seq stay consistent under concurrent requests.
-    const cur = (await q.query<{ last_seq: string | null; status: string }>(
-      'SELECT last_seq, status FROM nodes WHERE id = $1 FOR UPDATE', [node.id],
+    const cur = (await q.query<{ last_seq: string | null; status: string; farm_id: string }>(
+      'SELECT last_seq, status, farm_id FROM nodes WHERE id = $1 FOR UPDATE', [node.id],
     )).rows[0];
 
     const ins = await q.query<{ id: string }>(
@@ -145,6 +146,12 @@ export async function storeSnapshot(node: IngestNode, s: any): Promise<StoreResu
          JSON.stringify({ cpu_pct: cpu_pct ?? null, load: load ?? null, mem_used_bytes: mem_used_bytes ?? null,
                           mem_total_bytes: mem_total_bytes ?? null, disk_worst_pct: worst, uptime_s, node_time: env.node_time })],
       );
+    }
+    // A live Snapshot from a silent node ends its outage: close its alert now, so the recorded duration is
+    // the real one, and the farm alert too (the farm is no longer wholly down).
+    if (inserted && !env.replayed && env.seq > prevSeq && cur.status === 'stale') {
+      await closeAlert(q, RULE_NODE_STALE, node.id, 'node reported again');
+      await closeAlert(q, RULE_FARM_STALE, cur.farm_id, 'node reported again');
     }
     const newest = Math.max(prevSeq, inserted && !env.replayed ? env.seq : prevSeq);
     return { duplicate: !inserted, lastSeq: newest };

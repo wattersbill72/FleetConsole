@@ -35,5 +35,16 @@
         }
       ]
     }
-  ]
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/evaluate",
+      "schedule": "* * * * *"
+    }
+  ],
+  "functions": {
+    "api/cron/evaluate.ts": {
+      "maxDuration": 60
+    }
+  }
 }
