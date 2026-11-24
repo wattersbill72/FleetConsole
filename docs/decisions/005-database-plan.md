@@ -31,3 +31,5 @@ Controls: set the console project's autoscaling maximum to 0.5 CU (worst case ab
 Unmeasured: the cost the upgrade adds to the other apps' databases, because the plan covers the whole installation. Check last month's compute hours per project in Neon and multiply by $0.106. Any monthly minimum charge is not shown in the dialog.
 
 Isolation option: create the console's database under a separate Neon organisation or Vercel installation so its billing is separate. Costs nothing technically (the connection string is an environment variable). Not decided.
+
+Update 2026-11-24 (later): Bill reports the other apps are already at the Free limits and need more compute soon, so the installation-wide upgrade is wanted regardless. The isolation option is therefore moot; the console's project joins the upgraded installation. The 0.5 CU autoscaling maximum on the console project still applies.

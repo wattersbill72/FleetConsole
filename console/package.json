@@ -3,15 +3,19 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit",
+    "build": "npm run contracts:check && vite build",
+    "typecheck": "npm run contracts:check && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.app.json --noEmit",
     "migrate": "node scripts/migrate.mjs",
     "bootstrap": "node scripts/bootstrap-operator.mjs",
     "build:test": "tsc -p tsconfig.test.json",
-    "test": "bash scripts/with-test-db.sh \"npm run build:test && node --test test/*.test.mjs\""
+    "test": "bash scripts/with-test-db.sh \"npm run build:test && node --test test/*.test.mjs\"",
+    "contracts:build": "node scripts/build-contracts.mjs",
+    "contracts:check": "node scripts/build-contracts.mjs --check"
   },
   "dependencies": {
     "pg": "^8.13.0",

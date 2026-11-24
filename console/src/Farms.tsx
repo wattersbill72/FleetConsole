@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, type Farm } from './api';
+import { api, ApiError, type Farm, type NodeRow } from './api';
+import { AddNode } from './AddNode';
 
 const ZONES: string[] = (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf('timeZone');
 const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -85,12 +86,7 @@ function FarmView({ farm, onBack, onSaved }: { farm: Farm; onBack: () => void; o
           <p className="muted">{farm.time_zone}{farm.description ? ` · ${farm.description}` : ''}</p>
         </>
       )}
-      <div className="empty">
-        <h3>No nodes yet</h3>
-        <p>Enrol the first machine in this farm.</p>
-        {/* Enrolment arrives with US-010; this is its entry point. */}
-        <button disabled title="Available with US-010">Add node</button>
-      </div>
+      <Nodes farmId={farm.id} />
     </section>
   );
 }
@@ -142,3 +138,39 @@ function FarmForm(props: {
     </form>
   );
 }
+
+function Nodes({ farmId }: { farmId: string }) {
+  const [nodes, setNodes] = useState<NodeRow[] | null>(null);
+  const [adding, setAdding] = useState(false);
+  const load = () => api.nodes(farmId).then((r) => setNodes(r.nodes)).catch(() => setNodes([]));
+  useEffect(() => { void load(); }, [farmId]);
+  if (!nodes) return <p className="muted">Loading…</p>;
+
+  return (
+    <>
+      {nodes.length === 0 && !adding ? (
+        <div className="empty">
+          <h3>No nodes yet</h3>
+          <p>Enrol the first machine in this farm.</p>
+          <button onClick={() => setAdding(true)}>Add node</button>
+        </div>
+      ) : (
+        <>
+          <div className="row" style={{ marginTop: 16 }}>
+            <h3>Nodes</h3>
+            {!adding && <button onClick={() => setAdding(true)}>Add node</button>}
+          </div>
+          <ul className="list">
+            {nodes.map((n) => (
+              <li key={n.id}>
+                <strong>{n.display_name}</strong> <span className="muted">{n.platform} · {n.status}{n.hostname ? ` · ${n.hostname}` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {adding && <AddNode farmId={farmId} onClose={() => { setAdding(false); void load(); }} />}
+    </>
+  );
+}
+

@@ -1,4 +1,6 @@
 export interface Farm { id: string; name: string; description: string; time_zone: string; created_at: string; updated_at: string }
+export interface Enrolment { id: string; platform: 'ubuntu' | 'macos'; display_name: string | null; initial_config: Record<string, unknown>; created_at: string; expires_at: string }
+export interface NodeRow { id: string; display_name: string; platform: 'ubuntu' | 'macos'; status: string; hostname: string | null; agent_version: string | null; last_heartbeat_at: string | null; enrolled_at: string }
 export interface Me { user: { id: string; username: string }; org: { id: string; name: string; productName: string } }
 
 export class ApiError extends Error {
@@ -27,4 +29,10 @@ export const api = {
     request<{ farm: Farm }>('/api/farms', { method: 'POST', body: JSON.stringify(f) }),
   updateFarm: (id: string, f: Partial<{ name: string; description: string; time_zone: string }>) =>
     request<{ farm: Farm }>(`/api/farms/${id}`, { method: 'PATCH', body: JSON.stringify(f) }),
+  nodes: (farmId: string) => request<{ nodes: NodeRow[] }>(`/api/farms/${farmId}/nodes`),
+  enrolments: (farmId: string) => request<{ enrolments: Enrolment[] }>(`/api/farms/${farmId}/enrolments`),
+  createEnrolment: (farmId: string, body: { platform: 'ubuntu' | 'macos'; display_name?: string; intermittent: boolean; initial_config: Record<string, unknown> }) =>
+    request<{ enrolment: Enrolment; token: string; command: string }>(`/api/farms/${farmId}/enrolments`, { method: 'POST', body: JSON.stringify(body) }),
+  cancelEnrolment: (farmId: string, id: string) =>
+    request<{ ok: true }>(`/api/farms/${farmId}/enrolments/${id}`, { method: 'DELETE' }),
 };

@@ -17,3 +17,5 @@ button.link { background:none; color:var(--accent); padding:0; text-decoration:u
 .list { list-style:none; padding:0; display:grid; gap:8px; }
 .list li { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
 .empty { margin-top:16px; background:var(--card); border:1px dashed var(--line); border-radius:8px; padding:24px; display:grid; gap:8px; justify-items:start; }
+.cmd { margin:0; padding:12px; background:#101318; color:#e6e9ef; border-radius:6px; overflow-x:auto; white-space:pre-wrap; word-break:break-all; font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; }
+label.check { display:flex; gap:8px; align-items:center; font-weight:400; } label.check input { width:auto; }
